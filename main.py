@@ -4,6 +4,12 @@ import urllib.parse
 from datetime import datetime
 import asyncio
 import aiohttp
+import json
+from enum import Enum
+
+from json_parser import SearchCriteriaParser
+
+filename = "config.json"
 
 async def show_animation():
     frames = ['.', '..', '...', '.. \b', '. \b']
@@ -22,11 +28,63 @@ async def fetch_crossref_data(url, params, headers, timeout = 10):
         async with session.get(url, params=params, headers=headers, timeout=timeout) as response:
             return await response.json()
 
-async def main(keywords, max_results=10):
-    url = "https://api.crossref.org/works"
-    journal = "issn:1939-0122"
+class LicenseType(Enum):
+    NOT_FREE = 'NOT FREE'
+    FREE = 'FREE'
+    UNKNOWN = 'UNKNOWN'
+
+# Анализ лицензии Wiley по URL
+def analyze_wiley_license_url(license_url: str) -> LicenseType:
+    if not license_url:
+        return LicenseType.UNKNOWN
     
-    query = " OR ".join(keywords)
+    url_lower = license_url.lower()
+    
+    # Creative Commons = БЕСПЛАТНО
+    if "creativecommons.org" in url_lower:
+        return LicenseType.FREE
+        
+    # Wiley Terms = ПЛАТНО
+    elif "wiley.com" in url_lower and ("terms" in url_lower or "copyright" in url_lower):
+        return LicenseType.NOT_FREE
+    
+    # Другие признаки платного доступа
+    elif any(x in url_lower for x in ["rights-and-permissions", "subscription", "copyright"]):
+        return LicenseType.NOT_FREE
+    
+    # Другие открытые лицензии
+    elif any(x in url_lower for x in ["publicdomain", "pd", "cc0"]):
+        return LicenseType.FREE
+    
+    # Если не смогли определить - предполагаем платное
+    else:
+        return LicenseType.NOT_FREE
+
+async def main(max_results=10):
+    data_json = None
+    try:
+        with open(filename, 'r', encoding='utf-8') as file:
+            data_json = file.read()
+    except FileNotFoundError:
+        print(f"Файл {filename} не найден")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Ошибка парсинга JSON: {e}")
+        return None
+
+    parser = SearchCriteriaParser()
+    print(data_json)
+    criteria = parser.parse_json(data_json)
+    errors = parser.getErrors()
+    if errors:
+        for i, error in enumerate(errors):
+            print(error)
+        return 1
+
+    url = "https://api.crossref.org/works"
+    journal = f'issn:{criteria.journal_issn}'
+
+    query = " OR ".join(criteria.keywords)
 
     params = {
         'query': query,
@@ -45,7 +103,7 @@ async def main(keywords, max_results=10):
     full_url = f"{url}?{query_string}"
     
     print(f"Полный URL запроса: {full_url}")
-    print(f"Ищем статьи по ключевым словам: {', '.join(keywords)}")
+    print(f"Ищем статьи по ключевым словам: {', '.join(criteria.keywords)}")
 
     try:
         data = await fetch_crossref_data(url, params, headers, 20)
@@ -58,19 +116,21 @@ async def main(keywords, max_results=10):
         print(f"\nНайдено статей: {len(articles)}")
         print("-" * 50)
 
-        for i, article in enumerate(articles, 1):
-            title = article.get('tittle', ['Без названия'])[0]
+        for i, article in enumerate(articles):
+            title = article.get('title', ['Без названия. Название не найдено'])[0]
             authors = article.get('author', [])
             author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
+            license = article.get('license', [{url: 'unknown'}])[0]["URL"]
 
             print(f"{i}. {title}")
             print(f"   Авторы: {', '.join(author_names)}")
             if 'DOI' in article:
                 print(f"   DOI: {article['DOI']}")
+            print(f"access: {str(analyze_wiley_license_url(license))}")
             print("-" * 50)
 
-            return articles
-        
+        return articles
+
     except requests.exceptions.RequestException as e:
         print(f"Ошибка при запросе: {e}")
         return []
@@ -81,7 +141,7 @@ async def main(keywords, max_results=10):
 # Запускаем парсер
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        keywords = sys.argv[1:]
-        articles = asyncio.run(main(keywords, max_results=5))
+        max_result = sys.argv[1:1]
+        articles = asyncio.run(main(max_results=5))
     else:
-        print("Пока не сделано")
+        articles = asyncio.run(main(max_results=5))
