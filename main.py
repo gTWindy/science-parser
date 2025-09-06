@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 import json
 from enum import Enum
+from dataclasses import dataclass
 
 from json_parser import SearchCriteriaParser
 
@@ -32,6 +33,15 @@ class LicenseType(Enum):
     NOT_FREE = 'NOT FREE'
     FREE = 'FREE'
     UNKNOWN = 'UNKNOWN'
+
+@dataclass
+class Article:
+    issn: str
+    authors: tuple[str]
+    title: str
+    doi: str
+    access: str
+    pirate_resource: str = "Без поиска"
 
 # Анализ лицензии Wiley по URL
 def analyze_wiley_license_url(license_url: str) -> LicenseType:
@@ -108,15 +118,41 @@ async def main(max_results=10):
     try:
         data = await fetch_crossref_data(url, params, headers, 20)
 
+        if len(criteria.pirate_resources) > 0:
+            print("На данный момент у нас только один ресурс Sci-Hub")
+
+        articles_response = data['message']['items']
+        articles_count = len(articles_response)
+        data_aticles = []
+        for i, article in enumerate(articles_response):
+            title = article.get('title', ['Без названия. Название не найдено'])[0]
+            authors = article.get('author', [])
+            author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
+            license = article.get('license', [{url: 'unknown'}])[0]["URL"]
+            Doi = "Не найдено"
+            if 'DOI' in article:
+                Doi = article['DOI']
+            if len(criteria.pirate_resources) > 0:
+                try:
+                    print("cool")
+                except: 
+                    print("not cool")
+            article_obj = Article(
+                issn=criteria.journal_issn,
+                title=title,
+                authors=author_names,
+                access=license,  # или преобразовать в bool, если нужно
+                doi=Doi
+            )
+            data_aticles.append(article_obj)
+        
         # Останавливаем анимацию
         animation_task.cancel()
 
-        articles = data['message']['items']
-
-        print(f"\nНайдено статей: {len(articles)}")
+        print(f"\nНайдено статей: {articles_count}")
         print("-" * 50)
-
-        for i, article in enumerate(articles):
+        
+        for i, article in enumerate(articles_response):
             title = article.get('title', ['Без названия. Название не найдено'])[0]
             authors = article.get('author', [])
             author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
@@ -124,12 +160,12 @@ async def main(max_results=10):
 
             print(f"{i}. {title}")
             print(f"   Авторы: {', '.join(author_names)}")
-            if 'DOI' in article:
-                print(f"   DOI: {article['DOI']}")
+            if 'DOI' in articles_response:
+                print(f"   DOI: {articles_response['DOI']}")
             print(f"access: {str(analyze_wiley_license_url(license))}")
             print("-" * 50)
-
-        return articles
+                
+        return 0
 
     except requests.exceptions.RequestException as e:
         print(f"Ошибка при запросе: {e}")
@@ -142,6 +178,6 @@ async def main(max_results=10):
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         max_result = sys.argv[1:1]
-        articles = asyncio.run(main(max_results=5))
+        asyncio.run(main(max_results=5))
     else:
-        articles = asyncio.run(main(max_results=5))
+        asyncio.run(main(max_results=5))
