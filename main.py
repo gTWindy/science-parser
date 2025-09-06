@@ -1,4 +1,3 @@
-import requests
 import sys
 import urllib.parse
 from datetime import datetime
@@ -70,6 +69,86 @@ def analyze_wiley_license_url(license_url: str) -> LicenseType:
     else:
         return LicenseType.NOT_FREE
 
+# Проверяет доступность статьи на Sci-Hub
+async def check_sci_hub(session, doi: str, i) -> str:
+    if not doi or doi == "Не найдено":
+        return "Не найдено"
+    try:
+        async with session.get(f'https://sci-hub.ru/{doi}', timeout=100) as response:
+            content = await response.text()
+            return 'Найдено' if 'Не найдено' not in content else 'Не найдено'
+    except Exception as e:
+        print(f"Ошибка при проверке DOI {doi}: {e}")
+        return "Ошибка"
+    except asyncio.TimeoutError:
+        print(f"Таймаут при проверке DOI {doi}")
+        return "Таймаут"
+
+async def process_articles(criteria, crossref_response):
+    data_articles = []
+    
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        j = 0
+        for i, article in enumerate(crossref_response):
+            title = article.get('title', ['Без названия. Название не найдено'])[0]
+            authors = article.get('author', [])
+            author_names = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in authors[:2]]
+            license = analyze_wiley_license_url(article.get('license', [{"URL": 'unknown'}])[0]["URL"])
+            
+            doi = article.get('DOI', "Не найдено")
+            
+            article_obj = Article(
+                issn=criteria.journal_issn,
+                title=title,
+                authors=author_names,
+                access=license,
+                doi=doi,
+                pirate_resource='Не проверено'
+            )
+            
+            data_articles.append(article_obj)
+            
+            if len(criteria.pirate_resources) > 0 and license != LicenseType.FREE:
+                task = asyncio.create_task(check_sci_hub(session, doi, j))
+                j = j + 1
+                tasks.append((article_obj, task))
+        
+        # Ждем завершения всех запросов
+        for article_obj, task in tasks:
+            pirate_result = await task
+            article_obj.pirate_resource = pirate_result
+    
+    return data_articles
+
+async def process_articles2(criteria, crossref_response, data_articles):
+    async with aiohttp.ClientSession() as session:
+        for i, article in enumerate(crossref_response):
+            title = article.get('title', ['Без названия. Название не найдено'])[0]
+            authors = article.get('author', [])
+            author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
+            license = analyze_wiley_license_url(article.get('license', [{"url": 'unknown'}])[0]["URL"])
+            Doi = "Не найдено"
+            if 'DOI' in article:
+                Doi = article['DOI']
+            article_obj = Article(
+                issn=criteria.journal_issn,
+                title=title,
+                authors=author_names,
+                access=license,
+                doi=Doi
+            )
+            if len(criteria.pirate_resources) > 0 and license != LicenseType.FREE:
+                try:
+                    async with session.get(f'https://sci-hub.ru/{Doi}') as response:
+                        if await response.text() == 'Не найдено':
+                            article_obj.pirate_resource = 'Не найдено'
+                        else:
+                            article_obj.pirate_resource = 'Найдено'
+                except Exception as e: 
+                    print(e)
+            data_articles.append(article_obj)
+
 async def main(max_results=10):
     data_json = None
     try:
@@ -115,36 +194,16 @@ async def main(max_results=10):
     print(f"Полный URL запроса: {full_url}")
     print(f"Ищем статьи по ключевым словам: {', '.join(criteria.keywords)}")
 
+    if len(criteria.pirate_resources) > 0:
+            print("На данный момент у нас только один ресурс Sci-Hub")
+
     try:
         data = await fetch_crossref_data(url, params, headers, 20)
 
-        if len(criteria.pirate_resources) > 0:
-            print("На данный момент у нас только один ресурс Sci-Hub")
-
         articles_response = data['message']['items']
         articles_count = len(articles_response)
-        data_aticles = []
-        for i, article in enumerate(articles_response):
-            title = article.get('title', ['Без названия. Название не найдено'])[0]
-            authors = article.get('author', [])
-            author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
-            license = article.get('license', [{url: 'unknown'}])[0]["URL"]
-            Doi = "Не найдено"
-            if 'DOI' in article:
-                Doi = article['DOI']
-            if len(criteria.pirate_resources) > 0:
-                try:
-                    print("cool")
-                except: 
-                    print("not cool")
-            article_obj = Article(
-                issn=criteria.journal_issn,
-                title=title,
-                authors=author_names,
-                access=license,  # или преобразовать в bool, если нужно
-                doi=Doi
-            )
-            data_aticles.append(article_obj)
+    
+        data_articles = await process_articles(criteria, articles_response)
         
         # Останавливаем анимацию
         animation_task.cancel()
@@ -152,24 +211,16 @@ async def main(max_results=10):
         print(f"\nНайдено статей: {articles_count}")
         print("-" * 50)
         
-        for i, article in enumerate(articles_response):
-            title = article.get('title', ['Без названия. Название не найдено'])[0]
-            authors = article.get('author', [])
-            author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
-            license = article.get('license', [{url: 'unknown'}])[0]["URL"]
-
-            print(f"{i}. {title}")
-            print(f"   Авторы: {', '.join(author_names)}")
-            if 'DOI' in articles_response:
-                print(f"   DOI: {articles_response['DOI']}")
-            print(f"access: {str(analyze_wiley_license_url(license))}")
+        for i, article in enumerate(data_articles):
+            print(f"{i}. {article.title}")
+            print(f"   Авторы: {', '.join(article.authors)}")
+            print(f"   DOI: {article.doi}")
+            print(f"access: {article.access}")
+            print(f"pirate: {article.pirate_resource}")
             print("-" * 50)
                 
         return 0
 
-    except requests.exceptions.RequestException as e:
-        print(f"Ошибка при запросе: {e}")
-        return []
     except Exception as e:
         print(f"Неожиданная ошибка: {e}")
         return []
