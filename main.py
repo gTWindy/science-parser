@@ -8,6 +8,8 @@ from enum import Enum
 from dataclasses import dataclass
 
 from json_parser import SearchCriteriaParser
+from serializer import DataSerializer
+
 
 filename = "config.json"
 
@@ -42,37 +44,47 @@ class Article:
     access: str
     pirate_resource: str = "Без поиска"
 
+    # Преобразует объект Article в словарь
+    def to_dict(self):
+        return {
+            'issn': self.issn,
+            'authors': self.authors,
+            'title': self.title,
+            'access': self.access,
+            'pirate_resource': self.pirate_resource
+        }
+
 # Анализ лицензии Wiley по URL
-def analyze_wiley_license_url(license_url: str) -> LicenseType:
+def analyze_wiley_license_url(license_url: str) -> str:
     if not license_url:
-        return LicenseType.UNKNOWN
+        return LicenseType.UNKNOWN.value
     
     url_lower = license_url.lower()
     
     # Creative Commons = БЕСПЛАТНО
     if "creativecommons.org" in url_lower:
-        return LicenseType.FREE
+        return LicenseType.FREE.value
         
     # Wiley Terms = ПЛАТНО
     elif "wiley.com" in url_lower and ("terms" in url_lower or "copyright" in url_lower):
-        return LicenseType.NOT_FREE
+        return LicenseType.NOT_FREE.value
     
     # Другие признаки платного доступа
     elif any(x in url_lower for x in ["rights-and-permissions", "subscription", "copyright"]):
-        return LicenseType.NOT_FREE
+        return LicenseType.NOT_FREE.value
     
     # Другие открытые лицензии
     elif any(x in url_lower for x in ["publicdomain", "pd", "cc0"]):
-        return LicenseType.FREE
+        return LicenseType.FREE.value
     
     # Если не смогли определить - предполагаем платное
     else:
-        return LicenseType.NOT_FREE
+        return LicenseType.NOT_FREE.value
 
 # Проверяет доступность статьи на Sci-Hub
-async def check_sci_hub(session, doi: str, i) -> str:
+async def check_sci_hub(session, doi: str) -> str:
     if not doi or doi == "Не найдено":
-        return "Не найдено"
+        return "Doi не найдено"
     try:
         async with session.get(f'https://sci-hub.ru/{doi}', timeout=100) as response:
             content = await response.text()
@@ -110,8 +122,7 @@ async def process_articles(criteria, crossref_response):
             data_articles.append(article_obj)
             
             if len(criteria.pirate_resources) > 0 and license != LicenseType.FREE:
-                task = asyncio.create_task(check_sci_hub(session, doi, j))
-                j = j + 1
+                task = asyncio.create_task(check_sci_hub(session, doi))
                 tasks.append((article_obj, task))
         
         # Ждем завершения всех запросов
@@ -120,34 +131,6 @@ async def process_articles(criteria, crossref_response):
             article_obj.pirate_resource = pirate_result
     
     return data_articles
-
-async def process_articles2(criteria, crossref_response, data_articles):
-    async with aiohttp.ClientSession() as session:
-        for i, article in enumerate(crossref_response):
-            title = article.get('title', ['Без названия. Название не найдено'])[0]
-            authors = article.get('author', [])
-            author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors[:2]]
-            license = analyze_wiley_license_url(article.get('license', [{"url": 'unknown'}])[0]["URL"])
-            Doi = "Не найдено"
-            if 'DOI' in article:
-                Doi = article['DOI']
-            article_obj = Article(
-                issn=criteria.journal_issn,
-                title=title,
-                authors=author_names,
-                access=license,
-                doi=Doi
-            )
-            if len(criteria.pirate_resources) > 0 and license != LicenseType.FREE:
-                try:
-                    async with session.get(f'https://sci-hub.ru/{Doi}') as response:
-                        if await response.text() == 'Не найдено':
-                            article_obj.pirate_resource = 'Не найдено'
-                        else:
-                            article_obj.pirate_resource = 'Найдено'
-                except Exception as e: 
-                    print(e)
-            data_articles.append(article_obj)
 
 async def main(max_results=10):
     data_json = None
@@ -195,7 +178,9 @@ async def main(max_results=10):
     print(f"Ищем статьи по ключевым словам: {', '.join(criteria.keywords)}")
 
     if len(criteria.pirate_resources) > 0:
-            print("На данный момент у нас только один ресурс Sci-Hub")
+        print("На данный момент у нас только один ресурс Sci-Hub")
+    else:
+        print("Проверка наличия на пиратских ресурсах не проведется")
 
     try:
         data = await fetch_crossref_data(url, params, headers, 20)
@@ -209,16 +194,37 @@ async def main(max_results=10):
         animation_task.cancel()
 
         print(f"\nНайдено статей: {articles_count}")
-        print("-" * 50)
         
-        for i, article in enumerate(data_articles):
-            print(f"{i}. {article.title}")
-            print(f"   Авторы: {', '.join(article.authors)}")
-            print(f"   DOI: {article.doi}")
-            print(f"access: {article.access}")
-            print(f"pirate: {article.pirate_resource}")
-            print("-" * 50)
+        while(True):
+            char = input("Для загрузки статей введите - j, для загрузки в excel таблицу - e, чтобы просто вывести - p: ")
+            if char not in ('j', 'e', 'p'):
+                continue
+            
+            data_for_serialization = [article.to_dict() for article in data_articles]
+    
+            if char == 'j':
+                json_data = DataSerializer(data_for_serialization).to_json()
+                with open('output.json', 'w', encoding='utf-8') as f:
+                    f.write(json_data)
+                print("Данные сохранены в output.json")
+                break
                 
+            elif char == 'e':
+                excel_data = DataSerializer(data_for_serialization).to_excel()
+                with open('output.xlsx', 'wb') as f:
+                    f.write(excel_data.getvalue())
+                print("Данные сохранены в output.xlsx")
+                break
+            
+            else:
+                for i, article in enumerate(data_articles):
+                    print(f"{i}. {article.title}")
+                    print(f"   Авторы: {', '.join(article.authors)}")
+                    print(f"   DOI: {article.doi}")
+                    print(f"access: {article.access}")
+                    print(f"pirate: {article.pirate_resource}")
+                    print("-" * 50)
+                break                
         return 0
 
     except Exception as e:
