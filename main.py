@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from json_parser import SearchCriteriaParser
 from serializer import DataSerializer
+from if_parser import if_parser
 
 
 filename = "config.json"
@@ -42,6 +43,9 @@ class Article:
     title: str
     doi: str
     access: str
+    journal_title: str
+    journal_issn: str
+    impact_factor: float
     pirate_resource: str = "Без поиска"
 
     # Преобразует объект Article в словарь
@@ -51,7 +55,8 @@ class Article:
             'authors': self.authors,
             'title': self.title,
             'access': self.access,
-            'pirate_resource': self.pirate_resource
+            'pirate_resource': self.pirate_resource,
+            'impact_factor': self.impact_factor
         }
 
 # Анализ лицензии Wiley по URL
@@ -98,16 +103,17 @@ async def check_sci_hub(session, doi: str) -> str:
 
 async def process_articles(criteria, crossref_response):
     data_articles = []
-    
+    journal_fullname = {}
+
     async with aiohttp.ClientSession() as session:
         tasks = []
-        j = 0
         for i, article in enumerate(crossref_response):
             title = article.get('title', ['Без названия. Название не найдено'])[0]
             authors = article.get('author', [])
             author_names = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in authors[:2]]
             license = analyze_wiley_license_url(article.get('license', [{"URL": 'unknown'}])[0]["URL"])
-            
+            journal_title = article.get('container-title', [''])[0]
+            journal_issn = article.get('ISSN', ['not-found-print-issn', 'not-found-online-issn'])[1]
             doi = article.get('DOI', "Не найдено")
             
             article_obj = Article(
@@ -115,21 +121,29 @@ async def process_articles(criteria, crossref_response):
                 title=title,
                 authors=author_names,
                 access=license,
+                journal_title=journal_title,
+                journal_issn=journal_issn,
                 doi=doi,
-                pirate_resource='Не проверено'
+                pirate_resource='Не проверено',
+                impact_factor=-1
             )
-            
             data_articles.append(article_obj)
-            
+            if journal_issn not in journal_fullname:
+                journal_fullname[journal_issn] = f'{journal_title.replace(" ", "+")}-p-{journal_issn.replace("-", "")}'
             if len(criteria.pirate_resources) > 0 and license != LicenseType.FREE:
                 task = asyncio.create_task(check_sci_hub(session, doi))
                 tasks.append((article_obj, task))
-        
+
         # Ждем завершения всех запросов
         for article_obj, task in tasks:
             pirate_result = await task
             article_obj.pirate_resource = pirate_result
+
+    if_by_journal = if_parser(journal_fullname)
     
+    for article in data_articles:
+        article.impact_factor = if_by_journal[article.journal_issn]
+
     return data_articles
 
 async def main(max_results=10):
@@ -154,14 +168,20 @@ async def main(max_results=10):
         return 1
 
     url = "https://api.crossref.org/works"
-    journal = f'issn:{criteria.journal_issn}'
+    
+    filter = ""
+    if (criteria.journal_issn):
+        filter = f'issn:{criteria.journal_issn}'
+    else:
+        # 311 id у издательства Wiley в crossref
+        filter = f'member:311,type:journal-article'
 
     query = " OR ".join(criteria.keywords)
 
     params = {
         'query': query,
         #'rows': max_results,
-        'filter': journal
+        'filter': filter
     }
 
     headers = {

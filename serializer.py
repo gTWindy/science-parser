@@ -52,7 +52,6 @@ if __name__ == "__main__":
         if user_choice == 'json':
             result = serializer.serialize('json')
             print("JSON результат:")
-            print(result)
             
         elif user_choice == 'excel':
             result = serializer.serialize('excel')

@@ -153,12 +153,6 @@ class SearchCriteriaParser:
         
         issn = issn_data.strip()
         if not issn:
-            self._add_error(
-                ParserErrorType.INVALID_ISSN_FORMAT,
-                "ISSN не может быть пустым",
-                "journal_issn",
-                issn
-            )
             return ""
         
         # Проверка формата
