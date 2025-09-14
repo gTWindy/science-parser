@@ -43,7 +43,7 @@ class ParserError:
 
 @dataclass
 class SearchCriteria:
-    journal_issn: str
+    journals_issn: List[str]
     keywords: List[str]
     time_from: str
     time_to: str
@@ -87,7 +87,7 @@ class SearchCriteriaParser:
                 return None
             
             # Парсинг и валидация отдельных полей
-            journal_issn = self._parse_journal_issn(data['journal_issn'])
+            journals_issn = self._parse_journals_issn(data['journals_issn'])
             keywords = self._parse_keywords(data['keywords'])
             time_from = self._parse_date(data['time_from'], 'time_from')
             time_to = self._parse_date(data['time_to'], 'time_to')
@@ -106,7 +106,7 @@ class SearchCriteriaParser:
                 return None
             
             return SearchCriteria(
-                journal_issn=journal_issn,
+                journals_issn=journals_issn,
                 keywords=keywords,
                 time_from=time_from,
                 time_to=time_to,
@@ -123,7 +123,7 @@ class SearchCriteriaParser:
     
     # Проверяет наличие всех полей
     def _validate_required_fields(self, data: Dict[str, Any]) -> bool:
-        required_fields = ['journal_issn', 'keywords', 'time_from','time_to', 'pirate_resources']
+        required_fields = ['journals_issn', 'keywords', 'time_from','time_to', 'pirate_resources']
         missing_fields = []
         
         for field in required_fields:
@@ -141,40 +141,41 @@ class SearchCriteriaParser:
         return True
     
     # Парсит и валидирует ISSN
-    def _parse_journal_issn(self, issn_data: Any) -> str:
-        if not isinstance(issn_data, str):
+    def _parse_journals_issn(self, issn_data_list: Any) -> List[str]:
+        if not isinstance(issn_data_list, List):
             self._add_error(
                 ParserErrorType.INVALID_FIELD_TYPE,
-                "Поле должно быть строкой",
-                "journal_issn",
-                type(issn_data).__name__
+                "Поле должно быть списком строк",
+                "journals_issn",
+                type(issn_data_list).__name__
             )
             return ""
         
-        issn = issn_data.strip()
-        if not issn:
-            return ""
-        
-        # Проверка формата
-        if not re.match(r'^\d{4}-\d{3}[\dX]$', issn):
-            self._add_error(
-                ParserErrorType.INVALID_ISSN_FORMAT,
-                "Неверный формат ISSN. Ожидается XXXX-XXXX",
-                "journal_issn",
-                issn
-            )
-            return issn
-        
-        # Проверка контрольной суммы
-        if not self._validate_issn_checksum(issn):
-            self._add_error(
-                ParserErrorType.INVALID_ISSN_CHECKSUM,
-                "Неверная контрольная сумма ISSN",
-                "journal_issn",
-                issn
-            )
-        
-        return issn
+        for issn_data in issn_data_list:
+            issn = issn_data.strip()
+            if not issn:
+                return []
+            
+            # Проверка формата
+            if not re.match(r'^\d{4}-\d{3}[\dX]$', issn):
+                self._add_error(
+                    ParserErrorType.INVALID_ISSN_FORMAT,
+                    "Неверный формат ISSN. Ожидается XXXX-XXXX",
+                    "journals_issn",
+                    issn
+                )
+                return issn_data_list
+            
+            # Проверка контрольной суммы
+            if not self._validate_issn_checksum(issn):
+                self._add_error(
+                    ParserErrorType.INVALID_ISSN_CHECKSUM,
+                    "Неверная контрольная сумма ISSN",
+                    "journals_issn",
+                    issn
+                )
+            
+        return issn_data_list
 
     # Проверяет контрольную сумму ISSN
     def _validate_issn_checksum(self, issn: str) -> bool:
@@ -287,14 +288,14 @@ class SearchCriteriaParser:
 def test():
     breakpoint()
     # Тест 1
-    test_json = '{"journal_issn": "1234", "keywords": ["test"]}'
+    test_json = '{"journals_issn": "1234", "keywords": ["test"]}'
     parser = SearchCriteriaParser()
     result = parser.parse_json(test_json)
     assert result is None
     assert "Отсутствуют обязательные поля" in parser.get_validation_errors()[0]
     
     # Тест 2
-    test_json2 = '{"journal_issn": "1234", "keywords": ["test"], "time_from": "2020-01", "time_to": "2023-12", "pirate_resources": ["res1"]}'
+    test_json2 = '{"journals_issn": "1234", "keywords": ["test"], "time_from": "2020-01", "time_to": "2023-12", "pirate_resources": ["res1"]}'
     result2 = parser.parse_json(test_json2)
     assert result2 is None
     print("Все тесты пройдены! ✅")

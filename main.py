@@ -101,7 +101,7 @@ async def check_sci_hub(session, doi: str) -> str:
         print(f"Таймаут при проверке DOI {doi}")
         return "Таймаут"
 
-async def process_articles(criteria, crossref_response):
+async def process_articles(pirate_resources, crossref_response):
     data_articles = []
     journal_fullname = {}
 
@@ -117,7 +117,7 @@ async def process_articles(criteria, crossref_response):
             doi = article.get('DOI', "Не найдено")
             
             article_obj = Article(
-                issn=criteria.journal_issn,
+                issn=journal_issn,
                 title=title,
                 authors=author_names,
                 access=license,
@@ -130,7 +130,7 @@ async def process_articles(criteria, crossref_response):
             data_articles.append(article_obj)
             if journal_issn not in journal_fullname:
                 journal_fullname[journal_issn] = f'{journal_title.replace(" ", "+")}-p-{journal_issn.replace("-", "")}'
-            if len(criteria.pirate_resources) > 0 and license != LicenseType.FREE:
+            if len(pirate_resources) > 0 and license != LicenseType.FREE:
                 task = asyncio.create_task(check_sci_hub(session, doi))
                 tasks.append((article_obj, task))
 
@@ -170,8 +170,9 @@ async def main(max_results=10):
     url = "https://api.crossref.org/works"
     
     filter = ""
-    if (criteria.journal_issn):
-        filter = f'issn:{criteria.journal_issn}'
+    if (criteria.journals_issn):
+        filter_parts = list(map(lambda issn: f"issn:{issn}", criteria.journals_issn))
+        filter = ",".join(filter_parts)
     else:
         # 311 id у издательства Wiley в crossref
         filter = f'member:311,type:journal-article'
@@ -208,7 +209,7 @@ async def main(max_results=10):
         articles_response = data['message']['items']
         articles_count = len(articles_response)
     
-        data_articles = await process_articles(criteria, articles_response)
+        data_articles = await process_articles(criteria.pirate_resources, articles_response)
         
         # Останавливаем анимацию
         animation_task.cancel()
