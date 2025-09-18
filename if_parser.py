@@ -38,8 +38,13 @@ def if_parser(journal_name_list: dict):
         try:
             # Найти элемент по классу
             elements = soup.find_all('div', class_='text-piped')
-            impact_factor = elements[0].contents[2].contents[0].split()[2]
-            if_list[issn] = float(impact_factor)
+            contents = elements[0].contents
+            if (len(contents) > 1):
+                impact_factor = elements[0].contents[2].contents[0].split()[2]
+                if_list[issn] = float(impact_factor)
+            else:
+                print(f"\IF не указан для {journal_name}")
+                if_list[issn] = -1
         except Exception as e:
             print(f"\nНеожиданная ошибка для {journal_name}: {e}")
             print("Содержимое сайта поменялась, свяжитесь с автором программы")
