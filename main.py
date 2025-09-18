@@ -26,7 +26,7 @@ async def show_animation():
         i = (i + 1) % len(frames)
         await asyncio.sleep(0.3)
 
-async def fetch_crossref_data(url, params, headers, timeout = 10):
+async def fetch_crossref_data(url, params, headers, timeout = 50):
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params, headers=headers, timeout=timeout) as response:
             return await response.json()
@@ -95,13 +95,13 @@ async def check_sci_hub(session, doi: str) -> str:
             content = await response.text()
             return 'Найдено' if 'Не найдено' not in content else 'Не найдено'
     except Exception as e:
-        print(f"Ошибка при проверке DOI {doi}: {e}")
+        print(f"Ошибка при проверке DOI в sci-hub {doi}: {e}")
         return "Ошибка"
     except asyncio.TimeoutError:
         print(f"Таймаут при проверке DOI {doi}")
         return "Таймаут"
 
-async def process_articles(pirate_resources, crossref_response):
+async def process_articles(check_pirate_resources, crossref_response):
     data_articles = []
     journal_fullname = {}
 
@@ -113,7 +113,17 @@ async def process_articles(pirate_resources, crossref_response):
             author_names = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in authors[:2]]
             license = analyze_wiley_license_url(article.get('license', [{"URL": 'unknown'}])[0]["URL"])
             journal_title = article.get('container-title', [''])[0]
-            journal_issn = article.get('ISSN', ['not-found-print-issn', 'not-found-online-issn'])[1]
+            
+            issns = article.get('ISSN', [])
+            journal_issn = 'not-found-issn'
+            if issns:
+                # Если есть только один ISSN - берем его
+                if len(issns) == 1:
+                    journal_issn = issns[0]
+                # Если есть несколько - пытаемся найти online ISSN
+                else:
+                    journal_issn = issns[1] if len(issns) > 1 else issns[0]
+
             doi = article.get('DOI', "Не найдено")
             
             article_obj = Article(
@@ -130,7 +140,7 @@ async def process_articles(pirate_resources, crossref_response):
             data_articles.append(article_obj)
             if journal_issn not in journal_fullname:
                 journal_fullname[journal_issn] = f'{journal_title.replace(" ", "+")}-p-{journal_issn.replace("-", "")}'
-            if len(pirate_resources) > 0 and license != LicenseType.FREE:
+            if check_pirate_resources and license != LicenseType.FREE:
                 task = asyncio.create_task(check_sci_hub(session, doi))
                 tasks.append((article_obj, task))
 
@@ -209,18 +219,18 @@ async def main(max_results=10):
     print(f"Полный URL запроса: {full_url}")
     print(f"Ищем статьи по ключевым словам: {', '.join(criteria.keywords)}")
 
-    if len(criteria.pirate_resources) > 0:
+    if criteria.check_pirate_resources:
         print("На данный момент у нас только один ресурс Sci-Hub")
     else:
         print("Проверка наличия на пиратских ресурсах не проведется")
 
     try:
-        data = await fetch_crossref_data(url, params, headers, 20)
+        data = await fetch_crossref_data(url, params, headers, 40)
 
         articles_response = data['message']['items']
         articles_count = len(articles_response)
     
-        data_articles = await process_articles(criteria.pirate_resources, articles_response)
+        data_articles = await process_articles(criteria.check_pirate_resources, articles_response)
         
         # Останавливаем анимацию
         animation_task.cancel()
@@ -261,7 +271,7 @@ async def main(max_results=10):
         return 0
 
     except asyncio.TimeoutError as e:
-            print(f"Таймаут : {e}")
+            print(f"\nТаймаут : время ожмдания ответ исстекло")
             return 1
     except Exception as e:
         print(f"\nНеожиданная ошибка: {e}")

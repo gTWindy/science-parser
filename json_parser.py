@@ -47,7 +47,7 @@ class SearchCriteria:
     keywords: List[str]
     time_from: str
     time_to: str
-    pirate_resources: List[str]
+    check_pirate_resources: bool
 
 class SearchCriteriaParser:
     def __init__(self):
@@ -91,7 +91,7 @@ class SearchCriteriaParser:
             keywords = self._parse_keywords(data['keywords'])
             time_from = self._parse_date(data['time_from'], 'time_from')
             time_to = self._parse_date(data['time_to'], 'time_to')
-            pirate_resources = self._parse_resources(data['pirate_resources'])
+            check_pirate_resources = self._parse_resources(data['check_pirate_resources'])
             
             # Проверка временного диапазона
             if time_from and time_to and time_from > time_to:
@@ -110,7 +110,7 @@ class SearchCriteriaParser:
                 keywords=keywords,
                 time_from=time_from,
                 time_to=time_to,
-                pirate_resources=pirate_resources
+                check_pirate_resources=check_pirate_resources
             )
             
         except KeyError as e:
@@ -123,7 +123,7 @@ class SearchCriteriaParser:
     
     # Проверяет наличие всех полей
     def _validate_required_fields(self, data: Dict[str, Any]) -> bool:
-        required_fields = ['journals_issn', 'keywords', 'time_from','time_to', 'pirate_resources']
+        required_fields = ['journals_issn', 'keywords', 'time_from','time_to', 'check_pirate_resources']
         missing_fields = []
         
         for field in required_fields:
@@ -260,23 +260,13 @@ class SearchCriteriaParser:
         
         return date_str
     
-    # Парсит список пиратских ресурсов
-    def _parse_resources(self, resources_data: Any) -> List[str]:
-        if not isinstance(resources_data, list):
-            self.validation_errors.append("Поле 'список ресурсов для проверки' должно быть списком")
-            return []
-        
-        resources = []
-        for i, resource in enumerate(resources_data):
-            if not isinstance(resource, str):
-                self.validation_errors.append(f"Ресурс #{i+1} должен быть строкой")
-                continue
+    # Проверяет параметр проверки пиратских ресурсов
+    def _parse_resources(self, resources_data: Any) -> bool:
+        if not isinstance(resources_data, bool):
+            self.validation_errors.append("Поле 'Проверять пиратские ресурсы' должно быть булевым значением")
+            return False
             
-            cleaned_resource = resource.strip()
-            if cleaned_resource:
-                resources.append(cleaned_resource)
-        
-        return resources
+        return resources_data
 
 # Тесты
 def test():
@@ -289,7 +279,7 @@ def test():
     assert "Отсутствуют обязательные поля" in parser.get_validation_errors()[0]
     
     # Тест 2
-    test_json2 = '{"journals_issn": "1234", "keywords": ["test"], "time_from": "2020-01", "time_to": "2023-12", "pirate_resources": ["res1"]}'
+    test_json2 = '{"journals_issn": "1234", "keywords": ["test"], "time_from": "2020-01", "time_to": "2023-12", "check_pirate_resources": False}'
     result2 = parser.parse_json(test_json2)
     assert result2 is None
     print("Все тесты пройдены! ✅")

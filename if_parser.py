@@ -40,7 +40,9 @@ def if_parser(journal_name_list: dict):
             elements = soup.find_all('div', class_='text-piped')
             impact_factor = elements[0].contents[2].contents[0].split()[2]
             if_list[issn] = float(impact_factor)
-        except:
+        except Exception as e:
+            print(f"\nНеожиданная ошибка для {journal_name}: {e}")
             print("Содержимое сайта поменялась, свяжитесь с автором программы")
-            break
+            if_list[issn] = -1
+            continue
     return if_list
