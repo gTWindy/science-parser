@@ -1,5 +1,5 @@
 {
-    "journal_issn": "1875-905X",
+    "journals_issn": ["1875-905X"],
     "keywords": ["malware", "neuro", "net"],
     "time_from": "2020-01",
     "time_to": "2021-02",

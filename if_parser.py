@@ -20,7 +20,17 @@ def if_parser(journal_name_list: dict):
             response.raise_for_status()
             html_content = response.text
         except requests.exceptions.HTTPError as e:
-            print(f"HTTP ошибка: {e}")
+            print(f"\nHTTP ошибка: {e}")
+            print(f"Устанавливаем импакт фактор равным -1")
+            if_list[issn] = -1
+            continue
+        except requests.exceptions.Timeout as e:
+            print(f"Таймаут для {journal_name}: {e}")
+            if_list[issn] = -1
+            continue
+        except Exception as e:
+            print(f"Неожиданная ошибка для {journal_name}: {e}")
+            if_list[issn] = -1
             continue
         # Парсим HTML
         soup = BeautifulSoup(html_content, 'html.parser')

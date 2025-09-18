@@ -244,12 +244,16 @@ async def main(max_results=10):
                     print(f"   DOI: {article.doi}")
                     print(f"access: {article.access}")
                     print(f"pirate: {article.pirate_resource}")
+                    print(f"IF: {article.impact_factor}")
                     print("-" * 50)
                 break                
         return 0
 
+    except asyncio.TimeoutError as e:
+            print(f"Таймаут : {e}")
+            return 1
     except Exception as e:
-        print(f"Неожиданная ошибка: {e}")
+        print(f"\nНеожиданная ошибка: {e}")
         return []
 
 # Запускаем парсер
