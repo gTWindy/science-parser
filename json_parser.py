@@ -219,12 +219,6 @@ class SearchCriteriaParser:
         
         date_str = date_data.strip()
         if not date_str:
-            self._add_error(
-                ParserErrorType.INVALID_DATE_FORMAT,
-                "Дата не может быть пустой",
-                field_name,
-                date_str
-            )
             return ""
         
         # Проверка формата YYYY-MM

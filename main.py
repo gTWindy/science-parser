@@ -169,13 +169,24 @@ async def main(max_results=10):
 
     url = "https://api.crossref.org/works"
     
+    # Добавляем параметры к фильтру
+    def addToFilter(filter: str, value: str) -> str:
+        if filter:
+            return f"{filter},{value}"
+        else:
+            return value
+    
     filter = ""
+    if (criteria.time_from):
+        filter = addToFilter(filter, f"from-created-date:{criteria.time_from}")
+    if (criteria.time_to):
+        filter = addToFilter(filter, f"until-created-date:{criteria.time_to}")
     if (criteria.journals_issn):
         filter_parts = list(map(lambda issn: f"issn:{issn}", criteria.journals_issn))
-        filter = ",".join(filter_parts)
+        filter = addToFilter(filter, ",".join(filter_parts))
     else:
         # 311 id у издательства Wiley в crossref
-        filter = f'member:311,type:journal-article'
+        filter = addToFilter(filter, "member:311,type:journal-article")
 
     query = " OR ".join(criteria.keywords)
 
